@@ -1,0 +1,93 @@
+# Default values for Dalgo chart.
+# This is a YAML-formatted file.
+
+# Global Configurations
+environment: development
+debug: "True"
+djangoSecret: "local-django-secret-change-me"
+allowedHosts: "*"
+corsAllowedOrigins: "http://localhost:3000,http://localhost:3001"
+
+# Service Images
+images:
+  backend:
+    repository: dalgo_backend
+    tag: "0.1"
+    pullPolicy: IfNotPresent
+  redis:
+    repository: redis
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  postgres:
+    repository: postgres
+    tag: "15"
+    pullPolicy: IfNotPresent
+  webapp:
+    repository: dalgo_webapp
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  mockProxy:
+    repository: python
+    tag: "3.10-alpine"
+    pullPolicy: IfNotPresent
+
+# Database Settings
+postgres:
+  enabled: true
+  user: postgres
+  password: docker
+  db: dalgo
+  port: 5432
+  persistence:
+    enabled: true
+    size: 2Gi
+    storageClass: "" # Defaults to local k3s local-path provisioner
+
+# Redis Settings
+redis:
+  enabled: true
+  port: 6379
+
+# Prefect Proxy Mock Settings
+prefectProxy:
+  enabled: true
+  port: 8085
+
+# Airbyte Connection (External)
+airbyte:
+  host: "airbyte-proxy" # Adjust if Airbyte is deployed in another namespace
+  port: 8000
+  apiVer: v1
+  token: "YWlyYnl0ZTpwYXNzd29yZA==" # base64 encoder of airbyte:password
+  createBridgeService: false
+  externalIP: ""
+  deployInCluster: false
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: "traefik"
+  annotations:
+    ingress.kubernetes.io/ssl-redirect: "false"
+  hosts:
+    - host: dalgo.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+
+# Webapp (Frontend) Settings
+webapp:
+  enabled: true
+  replicaCount: 1
+  port: 3000
+  nextAuthSecret: "local-nextauth-secret-change-me"
+  # Optional overrides. If empty, these will be auto-derived based on the ingress host/service name.
+  backendUrl: ""
+  websocketUrl: ""
+  nextAuthUrl: ""
+  usageDashboardId: ""
+  usageDashboardDomain: ""
+  demoAccountDestSchema: "demostaging"
+  demoWalkthroughEnabled: "true"
+  airbyteUrl: "http://localhost:8000"
+  whitelistIps: "127.0.0.1"

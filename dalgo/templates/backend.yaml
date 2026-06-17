@@ -1,0 +1,67 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dalgo.fullname" . }}-backend
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "dalgo.fullname" . }}-backend
+  template:
+    metadata:
+      labels:
+        app: {{ include "dalgo.fullname" . }}-backend
+    spec:
+      containers:
+        - name: backend
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command: ["uvicorn", "ddpui.asgi:application", "--host", "0.0.0.0", "--port", "8002"]
+          ports:
+            - containerPort: 8002
+              name: http
+          envFrom:
+            - configMapRef:
+                name: {{ include "dalgo.fullname" . }}-config
+          env:
+            - name: DJANGOSECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dalgo.fullname" . }}-secrets
+                  key: DJANGOSECRET
+            - name: DBPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dalgo.fullname" . }}-secrets
+                  key: DBPASSWORD
+            - name: DBADMINUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dalgo.fullname" . }}-secrets
+                  key: DBADMINUSER
+            - name: DBADMINPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dalgo.fullname" . }}-secrets
+                  key: DBADMINPASSWORD
+            - name: AIRBYTE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dalgo.fullname" . }}-secrets
+                  key: AIRBYTE_API_TOKEN
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dalgo.fullname" . }}-backend
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+spec:
+  ports:
+    - port: 8002
+      targetPort: http
+      name: http
+  selector:
+    app: {{ include "dalgo.fullname" . }}-backend

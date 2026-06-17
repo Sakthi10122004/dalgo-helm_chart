@@ -1,0 +1,56 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "dalgo.fullname" . }}-initdb
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    metadata:
+      labels:
+        app: {{ include "dalgo.fullname" . }}-initdb
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: initdb
+          image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"
+          imagePullPolicy: {{ .Values.images.backend.pullPolicy }}
+          command:
+            - /bin/bash
+            - -c
+            - |
+              python manage.py migrate
+              python manage.py loaddata seed/*.json
+              python manage.py create-system-orguser
+          envFrom:
+            - configMapRef:
+                name: {{ include "dalgo.fullname" . }}-config
+          env:
+            - name: DJANGOSECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dalgo.fullname" . }}-secrets
+                  key: DJANGOSECRET
+            - name: DBPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dalgo.fullname" . }}-secrets
+                  key: DBPASSWORD
+            - name: DBADMINUSER
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dalgo.fullname" . }}-secrets
+                  key: DBADMINUSER
+            - name: DBADMINPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dalgo.fullname" . }}-secrets
+                  key: DBADMINPASSWORD
+            - name: AIRBYTE_API_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dalgo.fullname" . }}-secrets
+                  key: AIRBYTE_API_TOKEN

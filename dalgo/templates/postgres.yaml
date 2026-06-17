@@ -1,0 +1,72 @@
+{{- if .Values.postgres.enabled -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "dalgo.fullname" . }}-postgres-pvc
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: {{ .Values.postgres.persistence.size }}
+  {{- if .Values.postgres.persistence.storageClass }}
+  storageClassName: {{ .Values.postgres.persistence.storageClass | quote }}
+  {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dalgo.fullname" . }}-postgres
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "dalgo.fullname" . }}-postgres
+  template:
+    metadata:
+      labels:
+        app: {{ include "dalgo.fullname" . }}-postgres
+    spec:
+      containers:
+        - name: postgres
+          image: "{{ .Values.images.postgres.repository }}:{{ .Values.images.postgres.tag }}"
+          imagePullPolicy: {{ .Values.images.postgres.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.postgres.port }}
+              name: postgres
+          env:
+            - name: POSTGRES_DB
+              value: {{ .Values.postgres.db | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgres.user | quote }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dalgo.fullname" . }}-secrets
+                  key: DBPASSWORD
+          volumeMounts:
+            - name: postgres-data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: postgres-data
+          persistentVolumeClaim:
+            claimName: {{ include "dalgo.fullname" . }}-postgres-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dalgo.fullname" . }}-postgres
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+spec:
+  ports:
+    - port: {{ .Values.postgres.port }}
+      targetPort: postgres
+      name: postgres
+  selector:
+    app: {{ include "dalgo.fullname" . }}-postgres
+{{- end }}

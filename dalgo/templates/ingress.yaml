@@ -1,0 +1,97 @@
+{{- if .Values.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "dalgo.fullname" . }}
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  rules:
+    {{- range .Values.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- if and $.Values.webapp $.Values.webapp.enabled }}
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dalgo.fullname" $ }}-backend
+                port:
+                  number: 8002
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dalgo.fullname" $ }}-backend
+                port:
+                  number: 8002
+          - path: /webhooks
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dalgo.fullname" $ }}-backend
+                port:
+                  number: 8002
+          - path: /wss
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dalgo.fullname" $ }}-backend
+                port:
+                  number: 8002
+          - path: /healthcheck
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dalgo.fullname" $ }}-backend
+                port:
+                  number: 8002
+          - path: /docs
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dalgo.fullname" $ }}-backend
+                port:
+                  number: 8002
+          - path: /elementary
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dalgo.fullname" $ }}-backend
+                port:
+                  number: 8002
+          - path: /prometheus
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dalgo.fullname" $ }}-backend
+                port:
+                  number: 8002
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "dalgo.fullname" $ }}-webapp
+                port:
+                  number: {{ $.Values.webapp.port | default 3000 }}
+          {{- else }}
+          {{- range .paths }}
+          - path: {{ .path }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "dalgo.fullname" $ }}-backend
+                port:
+                  number: 8002
+          {{- end }}
+          {{- end }}
+    {{- end }}
+{{- end }}

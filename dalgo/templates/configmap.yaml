@@ -1,0 +1,21 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dalgo.fullname" . }}-config
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+data:
+  ENVIRONMENT: {{ .Values.environment | quote }}
+  DEBUG: {{ .Values.debug | quote }}
+  ALLOWED_HOSTS: {{ .Values.allowedHosts | quote }}
+  CORS_ALLOWED_ORIGINS: {{ .Values.corsAllowedOrigins | quote }}
+  DBHOST: "{{ include "dalgo.fullname" . }}-postgres"
+  DBPORT: "{{ .Values.postgres.port }}"
+  DBNAME: {{ .Values.postgres.db | quote }}
+  DBUSER: {{ .Values.postgres.user | quote }}
+  REDIS_HOST: "{{ include "dalgo.fullname" . }}-redis"
+  REDIS_PORT: "{{ .Values.redis.port }}"
+  AIRBYTE_SERVER_HOST: {{ .Values.airbyte.host | quote }}
+  AIRBYTE_SERVER_PORT: {{ .Values.airbyte.port | quote }}
+  AIRBYTE_SERVER_APIVER: {{ .Values.airbyte.apiVer | quote }}
+  PREFECT_PROXY_API_URL: "http://{{ include "dalgo.fullname" . }}-prefect-proxy:{{ .Values.prefectProxy.port }}"

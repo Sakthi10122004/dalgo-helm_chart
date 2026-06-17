@@ -1,0 +1,22 @@
+{{- if and .Values.airbyte.createBridgeService (not .Values.airbyte.deployInCluster) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: airbyte-proxy
+spec:
+  ports:
+  - port: {{ .Values.airbyte.port }}
+    protocol: TCP
+    targetPort: {{ .Values.airbyte.port }}
+---
+apiVersion: v1
+kind: Endpoints
+metadata:
+  name: airbyte-proxy
+subsets:
+- addresses:
+  - ip: {{ .Values.airbyte.externalIP | quote }}
+  ports:
+  - port: {{ .Values.airbyte.port }}
+    protocol: TCP
+{{- end }}

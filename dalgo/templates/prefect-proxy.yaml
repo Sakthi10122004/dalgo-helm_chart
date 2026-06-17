@@ -1,0 +1,111 @@
+{{- if .Values.prefectProxy.enabled -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dalgo.fullname" . }}-mock-proxy-script
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+data:
+  mock_prefect_proxy.py: |
+    import http.server
+    import json
+    import socketserver
+
+    PORT = 8085
+
+    class MockPrefectProxyHandler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            print(f"[MOCK PROXY] {format % args}")
+
+        def do_GET(self):
+            print(f"GET Request received: {self.path}")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            if "/proxy/blocks/airbyte/server/" in self.path:
+                self.wfile.write(json.dumps({"block_id": None}).encode("utf-8"))
+                return
+            self.wfile.write(json.dumps({"status": "ok"}).encode("utf-8"))
+
+        def do_POST(self):
+            print(f"POST Request received: {self.path}")
+            content_length = int(self.headers.get('Content-Length', 0))
+            body = self.rfile.read(content_length).decode('utf-8')
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            if "/proxy/blocks/airbyte/server/" in self.path:
+                try:
+                    data = json.loads(body)
+                    block_name = data.get("blockName", "mock-server")
+                except Exception:
+                    block_name = "mock-server"
+                response = {
+                    "block_id": "mock-prefect-block-id-12345",
+                    "cleaned_block_name": block_name
+                }
+                self.wfile.write(json.dumps(response).encode("utf-8"))
+                return
+            self.wfile.write(json.dumps({"status": "created"}).encode("utf-8"))
+
+        def do_PUT(self):
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps({"status": "updated"}).encode("utf-8"))
+
+    if __name__ == "__main__":
+        socketserver.TCPServer.allow_reuse_address = True
+        with socketserver.TCPServer(("", PORT), MockPrefectProxyHandler) as httpd:
+            print(f"Starting Mock Prefect Proxy on port {PORT}")
+            try:
+                httpd.serve_forever()
+            except KeyboardInterrupt:
+                pass
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dalgo.fullname" . }}-prefect-proxy
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "dalgo.fullname" . }}-prefect-proxy
+  template:
+    metadata:
+      labels:
+        app: {{ include "dalgo.fullname" . }}-prefect-proxy
+    spec:
+      containers:
+        - name: mock-proxy
+          image: "{{ .Values.images.mockProxy.repository }}:{{ .Values.images.mockProxy.tag }}"
+          imagePullPolicy: {{ .Values.images.mockProxy.pullPolicy }}
+          command: ["python", "/app/mock_prefect_proxy.py"]
+          ports:
+            - containerPort: {{ .Values.prefectProxy.port }}
+              name: proxy-port
+          volumeMounts:
+            - name: script-volume
+              mountPath: /app
+      volumes:
+        - name: script-volume
+          configMap:
+            name: {{ include "dalgo.fullname" . }}-mock-proxy-script
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dalgo.fullname" . }}-prefect-proxy
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+spec:
+  ports:
+    - port: {{ .Values.prefectProxy.port }}
+      targetPort: proxy-port
+      name: proxy-port
+  selector:
+    app: {{ include "dalgo.fullname" . }}-prefect-proxy
+{{- end }}

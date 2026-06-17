@@ -1,0 +1,477 @@
+{{- if .Values.airbyte.deployInCluster }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: airbyte-config
+data:
+  VERSION: "0.58.0"
+  DATABASE_USER: "docker"
+  DATABASE_PASSWORD: "docker"
+  DATABASE_HOST: "airbyte-db"
+  DATABASE_PORT: "5432"
+  DATABASE_DB: "airbyte"
+  DATABASE_URL: "jdbc:postgresql://airbyte-db:5432/airbyte"
+  TEMPORAL_HOST: "airbyte-temporal:7233"
+  INTERNAL_API_HOST: "airbyte-server:8001"
+  INTERNAL_API_URL: "http://airbyte-server:8001"
+  CONNECTOR_BUILDER_API_HOST: "airbyte-connector-builder-server:8080"
+  CONNECTOR_BUILDER_SERVER_API_HOST: "http://airbyte-connector-builder-server:8080"
+  WEBAPP_URL: "http://localhost:8000/"
+  AIRBYTE_API_HOST: "airbyte-api-server:8006"
+  STORAGE_TYPE: "local"
+  CONFIG_ROOT: "/data"
+  WORKSPACE_ROOT: "/tmp/workspace"
+  LOCAL_ROOT: "/tmp/airbyte_local"
+  TRACKING_STRATEGY: "segment"
+  SEGMENT_WRITE_KEY: "7UDdp5K55CyiGgsauOr2pNNujGvmhaeu"
+  JOB_ERROR_REPORTING_STRATEGY: "logging"
+  LOG_LEVEL: "INFO"
+  SECRET_PERSISTENCE: "TESTING_CONFIG_DB_TABLE"
+  BASIC_AUTH_USERNAME: {{ .Values.airbyte.username | default "airbyte" | quote }}
+  BASIC_AUTH_PASSWORD: {{ .Values.airbyte.password | default "password" | quote }}
+  BASIC_AUTH_PROXY_TIMEOUT: "900"
+  JOBS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION: "0.40.26.001"
+  CONFIGS_DATABASE_MINIMUM_FLYWAY_MIGRATION_VERSION: "0.40.23.002"
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: airbyte-db-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airbyte-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airbyte-db
+  template:
+    metadata:
+      labels:
+        app: airbyte-db
+    spec:
+      containers:
+      - name: db
+        image: airbyte/db:0.58.0
+        envFrom:
+        - configMapRef:
+            name: airbyte-config
+        env:
+        - name: POSTGRES_DB
+          value: "airbyte"
+        - name: POSTGRES_USER
+          value: "docker"
+        - name: POSTGRES_PASSWORD
+          value: "docker"
+        volumeMounts:
+        - name: db-data
+          mountPath: /var/lib/postgresql/data
+      volumes:
+      - name: db-data
+        persistentVolumeClaim:
+          claimName: airbyte-db-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airbyte-db
+spec:
+  ports:
+  - port: 5432
+    targetPort: 5432
+  selector:
+    app: airbyte-db
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airbyte-temporal
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airbyte-temporal
+  template:
+    metadata:
+      labels:
+        app: airbyte-temporal
+    spec:
+      containers:
+      - name: temporal
+        image: airbyte/temporal:0.58.0
+        envFrom:
+        - configMapRef:
+            name: airbyte-config
+        env:
+        - name: DB
+          value: "postgresql"
+        - name: DB_PORT
+          value: "5432"
+        - name: POSTGRES_USER
+          value: "docker"
+        - name: POSTGRES_PWD
+          value: "docker"
+        - name: POSTGRES_SEEDS
+          value: "airbyte-db"
+        - name: DYNAMIC_CONFIG_FILE_PATH
+          value: "config/dynamicconfig/development.yaml"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airbyte-temporal
+spec:
+  ports:
+  - port: 7233
+    targetPort: 7233
+  selector:
+    app: airbyte-temporal
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: airbyte-bootloader
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  template:
+    metadata:
+      labels:
+        app: airbyte-bootloader
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+      - name: wait-for-db
+        image: busybox
+        command: ['sh', '-c', 'until nc -z airbyte-db 5432; do echo waiting for db; sleep 2; done']
+      containers:
+      - name: bootloader
+        image: airbyte/bootloader:0.58.0
+        envFrom:
+        - configMapRef:
+            name: airbyte-config
+        env:
+        - name: AIRBYTE_VERSION
+          value: "0.58.0"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: docker-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: docker-proxy
+  template:
+    metadata:
+      labels:
+        app: docker-proxy
+    spec:
+      containers:
+      - name: socat
+        image: alpine/socat
+        command: ["socat", "-t", "900", "TCP-LISTEN:2375,fork,reuseaddr", "UNIX-CONNECT:/var/run/docker.sock"]
+        securityContext:
+          runAsUser: 0
+        volumeMounts:
+        - name: docker-sock
+          mountPath: /var/run/docker.sock
+      volumes:
+      - name: docker-sock
+        hostPath:
+          path: /var/run/docker.sock
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: docker-proxy
+spec:
+  ports:
+  - port: 2375
+    targetPort: 2375
+  selector:
+    app: docker-proxy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airbyte-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airbyte-server
+  template:
+    metadata:
+      labels:
+        app: airbyte-server
+    spec:
+      initContainers:
+      - name: wait-for-temporal
+        image: busybox
+        command: ['sh', '-c', 'until nc -z airbyte-temporal 7233; do echo waiting for temporal; sleep 2; done']
+      containers:
+      - name: server
+        image: airbyte/server:0.58.0
+        envFrom:
+        - configMapRef:
+            name: airbyte-config
+        env:
+        - name: AIRBYTE_VERSION
+          value: "0.58.0"
+        ports:
+        - containerPort: 8001
+        volumeMounts:
+        - name: workspace-vol
+          mountPath: /tmp/workspace
+        - name: local-root-vol
+          mountPath: /tmp/airbyte_local
+      volumes:
+      - name: workspace-vol
+        emptyDir: {}
+      - name: local-root-vol
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airbyte-server
+spec:
+  ports:
+  - port: 8001
+    targetPort: 8001
+  selector:
+    app: airbyte-server
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airbyte-worker
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airbyte-worker
+  template:
+    metadata:
+      labels:
+        app: airbyte-worker
+    spec:
+      initContainers:
+      - name: wait-for-server
+        image: busybox
+        command: ['sh', '-c', 'until nc -z airbyte-server 8001; do echo waiting for server; sleep 2; done']
+      containers:
+      - name: worker
+        image: airbyte/worker:0.58.0
+        envFrom:
+        - configMapRef:
+            name: airbyte-config
+        env:
+        - name: AIRBYTE_VERSION
+          value: "0.58.0"
+        - name: DOCKER_HOST
+          value: "docker-proxy:2375"
+        ports:
+        - containerPort: 9000
+        volumeMounts:
+        - name: workspace-vol
+          mountPath: /tmp/workspace
+        - name: local-root-vol
+          mountPath: /tmp/airbyte_local
+      volumes:
+      - name: workspace-vol
+        emptyDir: {}
+      - name: local-root-vol
+        emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airbyte-webapp
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airbyte-webapp
+  template:
+    metadata:
+      labels:
+        app: airbyte-webapp
+    spec:
+      containers:
+      - name: webapp
+        image: airbyte/webapp:0.58.0
+        envFrom:
+        - configMapRef:
+            name: airbyte-config
+        env:
+        - name: INTERNAL_API_HOST
+          value: "airbyte-server:8001"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airbyte-webapp
+spec:
+  ports:
+  - port: 80
+    targetPort: 80
+  selector:
+    app: airbyte-webapp
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airbyte-connector-builder-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airbyte-connector-builder-server
+  template:
+    metadata:
+      labels:
+        app: airbyte-connector-builder-server
+    spec:
+      containers:
+      - name: builder-server
+        image: airbyte/connector-builder-server:0.58.0
+        envFrom:
+        - configMapRef:
+            name: airbyte-config
+        ports:
+        - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airbyte-connector-builder-server
+spec:
+  ports:
+  - port: 8080
+    targetPort: 8080
+  selector:
+    app: airbyte-connector-builder-server
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airbyte-api-server
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airbyte-api-server
+  template:
+    metadata:
+      labels:
+        app: airbyte-api-server
+    spec:
+      containers:
+      - name: api-server
+        image: airbyte/airbyte-api-server:0.58.0
+        envFrom:
+        - configMapRef:
+            name: airbyte-config
+        ports:
+        - containerPort: 8006
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airbyte-api-server
+spec:
+  ports:
+  - port: 8006
+    targetPort: 8006
+  selector:
+    app: airbyte-api-server
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airbyte-cron
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airbyte-cron
+  template:
+    metadata:
+      labels:
+        app: airbyte-cron
+    spec:
+      containers:
+      - name: cron
+        image: airbyte/cron:0.58.0
+        envFrom:
+        - configMapRef:
+            name: airbyte-config
+        volumeMounts:
+        - name: workspace-vol
+          mountPath: /tmp/workspace
+      volumes:
+      - name: workspace-vol
+        emptyDir: {}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: airbyte-proxy
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: airbyte-proxy
+  template:
+    metadata:
+      labels:
+        app: airbyte-proxy
+    spec:
+      initContainers:
+      - name: wait-for-webapp
+        image: busybox
+        command: ['sh', '-c', 'until nc -z airbyte-webapp 80; do echo waiting for webapp; sleep 2; done']
+      containers:
+      - name: proxy
+        image: airbyte/proxy:0.58.0
+        envFrom:
+        - configMapRef:
+            name: airbyte-config
+        ports:
+        - containerPort: 8000
+          name: http
+        - containerPort: 8001
+          name: server
+        - containerPort: 8006
+          name: api
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: airbyte-proxy
+spec:
+  ports:
+  - port: 8000
+    targetPort: 8000
+    name: http
+  - port: 8001
+    targetPort: 8001
+    name: server
+  - port: 8006
+    targetPort: 8006
+    name: api
+  selector:
+    app: airbyte-proxy
+{{- end }}

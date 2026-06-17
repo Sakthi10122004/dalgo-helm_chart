@@ -1,0 +1,6 @@
+apiVersion: v2
+name: dalgo
+description: A Helm chart for deploying Dalgo platform (Backend, Databases, Celery Workers, and Mock Proxy)
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
