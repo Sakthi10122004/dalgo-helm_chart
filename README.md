@@ -8,6 +8,9 @@ This repository contains a Helm chart to deploy the Dalgo platform (backend, web
 - Default values: [dalgo/values.yaml](dalgo/values.yaml)
 - K3s / Helm deploy guide: [Docs/k3s_deployment.md](Docs/k3s_deployment.md)
 - Local Docker deploy guide: [Docs/docker_deployment.md](Docs/docker_deployment.md)
+- **Multi-Tenant Deployment Guide**: [MULTI_TENANT_GUIDE.md](MULTI_TENANT_GUIDE.md)
+- **Deployment Examples**: [EXAMPLES.md](EXAMPLES.md)
+- **Changes Summary**: [CHANGES_SUMMARY.md](CHANGES_SUMMARY.md)
 
 ## Requirements
 
@@ -46,6 +49,40 @@ All configurable values live in [dalgo/values.yaml](dalgo/values.yaml). Key sect
 - `ingress` — host, annotations and TLS settings
 
 Adjust these values for your environment before installing/upgrading the chart.
+
+## Multi-Tenant Deployment
+
+This chart supports deploying multiple instances of Dalgo in the **same Kubernetes namespace** with complete resource isolation. Each instance has its own:
+
+- Isolated PostgreSQL database and PVCs
+- Services and deployments
+- Configurations and secrets
+- Optional in-cluster Airbyte instances
+
+**To deploy multiple organizations:**
+
+```bash
+# Deploy organization 1
+helm install dalgo-org1 ./dalgo -f values-org1.yaml -n dalgo-orgs --create-namespace
+
+# Deploy organization 2
+helm install dalgo-org2 ./dalgo -f values-org2.yaml -n dalgo-orgs
+```
+
+Each release automatically gets isolated resources named with the release name prefix (e.g., `dalgo-org1-backend`, `dalgo-org1-postgres-pvc`).
+
+**See [MULTI_TENANT_GUIDE.md](MULTI_TENANT_GUIDE.md) for:**
+- Complete multi-tenant architecture overview
+- Step-by-step deployment instructions
+- Resource isolation and naming conventions
+- Scaling, monitoring, and troubleshooting
+
+**See [EXAMPLES.md](EXAMPLES.md) for:**
+- Ready-to-use configuration examples
+- Multi-organization deployments
+- Dev/staging/production environments
+- Backup and restore scripts
+- Automated deployment automation
 
 ## Chart structure and templates
 

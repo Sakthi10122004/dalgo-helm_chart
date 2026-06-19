@@ -1,5 +1,15 @@
 # Default values for Dalgo chart.
 # This is a YAML-formatted file.
+# 
+# MULTI-TENANCY SUPPORT:
+# To deploy multiple instances of Dalgo in the same namespace for different organizations:
+# 1. Use unique Release names: helm install dalgo-org1 ./dalgo --values values.yaml
+#                              helm install dalgo-org2 ./dalgo --values values.yaml
+# 2. Each release will have isolated:
+#    - Databases and PVCs (with release name prefix)
+#    - Services and Deployments
+#    - Configuration and Secrets
+# 3. Multiple pods will coexist without conflicts
 
 # Global Configurations
 environment: development
@@ -62,6 +72,13 @@ airbyte:
   createBridgeService: false
   externalIP: ""
   deployInCluster: false
+  username: "airbyte"
+  password: "password"
+  # Persistence for Airbyte database (when deployInCluster is true)
+  persistence:
+    enabled: true
+    size: 10Gi
+    storageClass: "" # Defaults to local k3s local-path provisioner
 
 # Ingress configuration
 ingress:
