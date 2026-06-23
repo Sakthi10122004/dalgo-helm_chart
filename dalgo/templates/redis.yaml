@@ -22,7 +22,7 @@ spec:
           ports:
             - containerPort: {{ .Values.redis.port }}
               name: redis
-{{- if .Values.redis.persistence -}}
+{{- if .Values.redis.persistence }}
           volumeMounts:
             - name: redis-data
               mountPath: /data

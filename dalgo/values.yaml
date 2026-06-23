@@ -21,7 +21,7 @@ corsAllowedOrigins: "http://localhost:3000,http://localhost:3001"
 # Service Images
 images:
   backend:
-    repository: dalgo_backend
+    repository: dalgo_backend_main_image
     tag: "0.1"
     pullPolicy: IfNotPresent
   redis:
@@ -34,7 +34,7 @@ images:
     pullPolicy: IfNotPresent
   webapp:
     repository: dalgo_webapp
-    tag: "latest"
+    tag: "0.1"
     pullPolicy: IfNotPresent
   mockProxy:
     repository: python
@@ -68,10 +68,10 @@ airbyte:
   host: "airbyte-proxy" # Adjust if Airbyte is deployed in another namespace
   port: 8000
   apiVer: v1
-  token: "YWlyYnl0ZTpwYXNzd29yZA==" # base64 encoder of airbyte:password
+  token: "airbyte:password" # Raw value; secret.yaml will base64-encode it
   createBridgeService: false
   externalIP: ""
-  deployInCluster: false
+  deployInCluster: true
   username: "airbyte"
   password: "password"
   # Persistence for Airbyte database (when deployInCluster is true)
@@ -100,6 +100,7 @@ webapp:
   nextAuthSecret: "local-nextauth-secret-change-me"
   # Optional overrides. If empty, these will be auto-derived based on the ingress host/service name.
   backendUrl: ""
+  serverBackendUrl: ""
   websocketUrl: ""
   nextAuthUrl: ""
   usageDashboardId: ""

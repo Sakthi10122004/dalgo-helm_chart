@@ -15,7 +15,12 @@ data:
   DBUSER: {{ .Values.postgres.user | quote }}
   REDIS_HOST: "{{ include "dalgo.fullname" . }}-redis"
   REDIS_PORT: "{{ .Values.redis.port }}"
+  {{- if .Values.airbyte.deployInCluster }}
+  AIRBYTE_SERVER_HOST: "{{ include "dalgo.fullname" . }}-airbyte-proxy"
+  AIRBYTE_SERVER_PORT: "{{ .Values.airbyte.port }}"
+  {{- else }}
   AIRBYTE_SERVER_HOST: {{ .Values.airbyte.host | quote }}
-  AIRBYTE_SERVER_PORT: {{ .Values.airbyte.port | quote }}
+  AIRBYTE_SERVER_PORT: "{{ .Values.airbyte.port }}"
+  {{- end }}
   AIRBYTE_SERVER_APIVER: {{ .Values.airbyte.apiVer | quote }}
   PREFECT_PROXY_API_URL: "http://{{ include "dalgo.fullname" . }}-prefect-proxy:{{ .Values.prefectProxy.port }}"

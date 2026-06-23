@@ -14,6 +14,13 @@ spec:
       labels:
         app: {{ include "dalgo.fullname" . }}-backend
     spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: busybox
+          command: ['sh', '-c', 'until nc -z {{ include "dalgo.fullname" . }}-postgres {{ .Values.postgres.port }}; do echo waiting for postgres; sleep 2; done']
+        - name: wait-for-redis
+          image: busybox
+          command: ['sh', '-c', 'until nc -z {{ include "dalgo.fullname" . }}-redis {{ .Values.redis.port }}; do echo waiting for redis; sleep 2; done']
       containers:
         - name: backend
           image: "{{ .Values.images.backend.repository }}:{{ .Values.images.backend.tag }}"

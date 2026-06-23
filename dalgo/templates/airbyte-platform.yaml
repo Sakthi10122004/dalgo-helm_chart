@@ -2,11 +2,23 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
+  name: {{ include "dalgo.fullname" . }}-airbyte-temporal-dynamicconfig
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+data:
+  development.yaml: |
+    # Temporal dynamic config - required for startup
+    {}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
   name: {{ include "dalgo.fullname" . }}-airbyte-config
   labels:
     {{- include "dalgo.labels" . | nindent 4 }}
 data:
   VERSION: "0.58.0"
+  MICRONAUT_ENVIRONMENTS: "control-plane"
   DATABASE_USER: "docker"
   DATABASE_PASSWORD: "docker"
   DATABASE_HOST: "{{ include "dalgo.fullname" . }}-airbyte-db"
@@ -14,13 +26,24 @@ data:
   DATABASE_DB: "airbyte"
   DATABASE_URL: "jdbc:postgresql://{{ include "dalgo.fullname" . }}-airbyte-db:5432/airbyte"
   TEMPORAL_HOST: "{{ include "dalgo.fullname" . }}-airbyte-temporal:7233"
-  INTERNAL_API_HOST: "airbyte-server:8001"
-  INTERNAL_API_URL: "http://airbyte-server:8001"
-  CONNECTOR_BUILDER_API_HOST: "airbyte-connector-builder-server:8080"
-  CONNECTOR_BUILDER_SERVER_API_HOST: "http://airbyte-connector-builder-server:8080"
-  WEBAPP_URL: "http://localhost:8000/"
-  AIRBYTE_API_HOST: "airbyte-api-server:8006"
-  STORAGE_TYPE: "local"
+  INTERNAL_API_HOST: "{{ include "dalgo.fullname" . }}-airbyte-server:8001"
+  INTERNAL_API_URL: "http://{{ include "dalgo.fullname" . }}-airbyte-server:8001"
+  CONNECTOR_BUILDER_API_HOST: "{{ include "dalgo.fullname" . }}-airbyte-connector-builder-server:8080"
+  CONNECTOR_BUILDER_SERVER_API_HOST: "http://{{ include "dalgo.fullname" . }}-airbyte-connector-builder-server:8080"
+  WEBAPP_URL: "http://{{ include "dalgo.fullname" . }}-airbyte-proxy:8000/"
+  AIRBYTE_API_HOST: "{{ include "dalgo.fullname" . }}-airbyte-api-server:8006"
+  STORAGE_TYPE: "S3"
+  S3_MINIO_ENDPOINT: "http://{{ include "dalgo.fullname" . }}-airbyte-minio:9000"
+  S3_PATH_STYLE_ACCESS: "true"
+  AWS_ACCESS_KEY_ID: "minioadmin"
+  AWS_SECRET_ACCESS_KEY: "minioadmin"
+  AWS_REGION: "us-east-1"
+  AWS_DEFAULT_REGION: "us-east-1"
+  S3_REGION: "us-east-1"
+  STORAGE_BUCKET_LOG: "airbyte-logs"
+  STORAGE_BUCKET_STATE: "airbyte-state"
+  STORAGE_BUCKET_WORKLOAD_OUTPUT: "airbyte-workload-output"
+  STORAGE_BUCKET_ACTIVITY_PAYLOAD: "airbyte-activity-payload"
   CONFIG_ROOT: "/data"
   WORKSPACE_ROOT: "/tmp/workspace"
   LOCAL_ROOT: "/tmp/airbyte_local"
@@ -28,7 +51,7 @@ data:
   SEGMENT_WRITE_KEY: "7UDdp5K55CyiGgsauOr2pNNujGvmhaeu"
   JOB_ERROR_REPORTING_STRATEGY: "logging"
   LOG_LEVEL: "INFO"
-  SECRET_PERSISTENCE: "TESTING_CONFIG_DB_TABLE"
+  SECRET_PERSISTENCE: "NO_OP"
   BASIC_AUTH_USERNAME: {{ .Values.airbyte.username | default "airbyte" | quote }}
   BASIC_AUTH_PASSWORD: {{ .Values.airbyte.password | default "password" | quote }}
   BASIC_AUTH_PROXY_TIMEOUT: "900"
@@ -47,6 +70,9 @@ spec:
   resources:
     requests:
       storage: {{ .Values.airbyte.persistence.size | default "10Gi" }}
+  {{- if .Values.airbyte.persistence.storageClass }}
+  storageClassName: {{ .Values.airbyte.persistence.storageClass | quote }}
+  {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -133,6 +159,13 @@ spec:
           value: "{{ include "dalgo.fullname" . }}-airbyte-db"
         - name: DYNAMIC_CONFIG_FILE_PATH
           value: "config/dynamicconfig/development.yaml"
+        volumeMounts:
+        - name: dynamic-config
+          mountPath: /etc/temporal/config/dynamicconfig
+      volumes:
+      - name: dynamic-config
+        configMap:
+          name: {{ include "dalgo.fullname" . }}-airbyte-temporal-dynamicconfig
 ---
 apiVersion: v1
 kind: Service
@@ -150,13 +183,11 @@ spec:
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "dalgo.fullname" . }}-airbyte-bootloader
+  name: {{ include "dalgo.fullname" . }}-airbyte-boot-{{ .Release.Revision }}
   labels:
     {{- include "dalgo.labels" . | nindent 4 }}
-  annotations:
-    "helm.sh/hook": post-install,post-upgrade
-    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
+  ttlSecondsAfterFinished: 180
   template:
     metadata:
       labels:
@@ -344,6 +375,10 @@ spec:
         env:
         - name: INTERNAL_API_HOST
           value: "{{ include "dalgo.fullname" . }}-airbyte-server:8001"
+        - name: INTERNAL_API_URL
+          value: "http://{{ include "dalgo.fullname" . }}-airbyte-server:8001"
+        - name: KEYCLOAK_INTERNAL_HOST
+          value: "localhost"
 ---
 apiVersion: v1
 kind: Service
@@ -354,7 +389,7 @@ metadata:
 spec:
   ports:
   - port: 80
-    targetPort: 80
+    targetPort: 8080
   selector:
     app: {{ include "dalgo.fullname" . }}-airbyte-webapp
 ---
@@ -489,6 +524,15 @@ spec:
         envFrom:
         - configMapRef:
             name: {{ include "dalgo.fullname" . }}-airbyte-config
+        env:
+        - name: PROXY_PASS_WEB
+          value: "http://{{ include "dalgo.fullname" . }}-airbyte-webapp:80"
+        - name: PROXY_PASS_API
+          value: "http://{{ include "dalgo.fullname" . }}-airbyte-server:8001"
+        - name: CONNECTOR_BUILDER_SERVER_API
+          value: "http://{{ include "dalgo.fullname" . }}-airbyte-connector-builder-server:8080"
+        - name: PROXY_PASS_AIRBYTE_API_SERVER
+          value: "http://{{ include "dalgo.fullname" . }}-airbyte-api-server:8006"
         ports:
         - containerPort: 8000
           name: http
@@ -516,4 +560,58 @@ spec:
     name: api
   selector:
     app: {{ include "dalgo.fullname" . }}-airbyte-proxy
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dalgo.fullname" . }}-airbyte-minio
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "dalgo.fullname" . }}-airbyte-minio
+  template:
+    metadata:
+      labels:
+        app: {{ include "dalgo.fullname" . }}-airbyte-minio
+    spec:
+      containers:
+      - name: minio
+        image: minio/minio:RELEASE.2024-01-28T22-35-53Z
+        command: ["sh", "-c", "mkdir -p /data/airbyte-logs /data/airbyte-state /data/airbyte-workload-output /data/airbyte-activity-payload && exec minio server /data --console-address :9001"]
+        env:
+        - name: MINIO_ROOT_USER
+          value: "minioadmin"
+        - name: MINIO_ROOT_PASSWORD
+          value: "minioadmin"
+        ports:
+        - containerPort: 9000
+          name: api
+        - containerPort: 9001
+          name: console
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dalgo.fullname" . }}-airbyte-minio
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+spec:
+  ports:
+  - port: 9000
+    targetPort: 9000
+    name: api
+  - port: 9001
+    targetPort: 9001
+    name: console
+  selector:
+    app: {{ include "dalgo.fullname" . }}-airbyte-minio
 {{- end }}

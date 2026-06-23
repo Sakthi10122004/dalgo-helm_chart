@@ -11,15 +11,69 @@ metadata:
   labels:
     {{- include "dalgo.labels" . | nindent 4 }}
 data:
-  NEXT_PUBLIC_BACKEND_URL: {{ default (printf "http://%s:8002" $host) .Values.webapp.backendUrl | quote }}
-  NEXT_PUBLIC_WEBSOCKET_URL: {{ default (printf "ws://%s:8002" $host) .Values.webapp.websocketUrl | quote }}
-  NEXTAUTH_URL: {{ default (printf "http://%s:3000" $host) .Values.webapp.nextAuthUrl | quote }}
+  NEXT_PUBLIC_BACKEND_URL: {{ default (printf "http://%s:%d" $host (int (.Values.webapp.port | default 3000))) .Values.webapp.backendUrl | quote }}
+  SERVER_BACKEND_URL: {{ default (printf "http://%s-backend:8002" (include "dalgo.fullname" .)) .Values.webapp.serverBackendUrl | quote }}
+  NEXT_PUBLIC_WEBSOCKET_URL: {{ default (printf "ws://%s:%d" $host (int (.Values.webapp.port | default 3000))) .Values.webapp.websocketUrl | quote }}
+  NEXTAUTH_URL: {{ default (printf "http://%s:%d" $host (int (.Values.webapp.port | default 3000))) .Values.webapp.nextAuthUrl | quote }}
   NEXT_PUBLIC_USAGE_DASHBOARD_ID: {{ .Values.webapp.usageDashboardId | default "" | quote }}
   NEXT_PUBLIC_USAGE_DASHBOARD_DOMAIN: {{ .Values.webapp.usageDashboardDomain | default "" | quote }}
   NEXT_PUBLIC_DEMO_ACCOUNT_DEST_SCHEMA: {{ .Values.webapp.demoAccountDestSchema | default "demostaging" | quote }}
   NEXT_PUBLIC_DEMO_WALKTHROUGH_ENABLED: {{ .Values.webapp.demoWalkthroughEnabled | default "true" | quote }}
   NEXT_PUBLIC_AIRBYTE_URL: {{ .Values.webapp.airbyteUrl | default "http://localhost:8000" | quote }}
   NEXT_PUBLIC_DALGO_WHITELIST_IPS: {{ .Values.webapp.whitelistIps | default "127.0.0.1" | quote }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dalgo.fullname" . }}-webapp-nginx-config
+  labels:
+    {{- include "dalgo.labels" . | nindent 4 }}
+data:
+  nginx.conf: |
+    events {
+        worker_connections 1024;
+    }
+    http {
+        include       /etc/nginx/mime.types;
+        default_type  application/octet-stream;
+        
+        server {
+            listen {{ .Values.webapp.port | default 3000 }};
+            
+            # Webapp (Next.js) on localhost:3001
+            location / {
+                proxy_pass http://127.0.0.1:3001;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+            }
+
+            # Backend APIs
+            location ~ ^/(api|webhooks|admin|docs|elementary|prometheus|healthcheck|sentry-debug) {
+                proxy_pass http://{{ include "dalgo.fullname" . }}-backend:8002;
+                proxy_set_header Host $host;
+                proxy_set_header X-Real-IP $remote_addr;
+                proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+                proxy_set_header X-Forwarded-Proto $scheme;
+                proxy_read_timeout 900;
+                proxy_connect_timeout 900;
+                proxy_send_timeout 900;
+            }
+
+            # Backend Websockets
+            location ~ ^/wss {
+                proxy_pass http://{{ include "dalgo.fullname" . }}-backend:8002;
+                proxy_http_version 1.1;
+                proxy_set_header Upgrade $http_upgrade;
+                proxy_set_header Connection "Upgrade";
+                proxy_set_header Host $host;
+                proxy_read_timeout 900;
+                proxy_connect_timeout 900;
+                proxy_send_timeout 900;
+            }
+        }
+    }
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -42,17 +96,34 @@ spec:
           image: "{{ .Values.images.webapp.repository }}:{{ .Values.images.webapp.tag }}"
           imagePullPolicy: {{ .Values.images.webapp.pullPolicy }}
           ports:
-            - containerPort: {{ .Values.webapp.port }}
-              name: http
+            - containerPort: 3001
+              name: nodejs
           envFrom:
             - configMapRef:
                 name: {{ include "dalgo.fullname" . }}-webapp-config
           env:
+            - name: HOSTNAME
+              value: "0.0.0.0"
+            - name: PORT
+              value: "3001"
             - name: NEXTAUTH_SECRET
               valueFrom:
                 secretKeyRef:
                   name: {{ include "dalgo.fullname" . }}-secrets
                   key: NEXTAUTH_SECRET
+        - name: nginx-proxy
+          image: nginx:alpine
+          ports:
+            - containerPort: {{ .Values.webapp.port | default 3000 }}
+              name: http
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: {{ include "dalgo.fullname" . }}-webapp-nginx-config
 ---
 apiVersion: v1
 kind: Service
@@ -62,7 +133,7 @@ metadata:
     {{- include "dalgo.labels" . | nindent 4 }}
 spec:
   ports:
-    - port: {{ .Values.webapp.port }}
+    - port: {{ .Values.webapp.port | default 3000 }}
       targetPort: http
       name: http
   selector:
